@@ -1,7 +1,13 @@
 import { defineConfig } from 'vite';
-import react from '@vitejs/plugin-react';
+import vue from '@vitejs/plugin-vue';
 import nodepod from '@scelar/nodepod/vite';
 
 export default defineConfig({
-  plugins: [nodepod(), react()],
+  plugins: [nodepod(), vue()],
+  server: {
+    headers: {
+      'Cross-Origin-Opener-Policy': 'same-origin',
+      'Cross-Origin-Embedder-Policy': 'credentialless',
+    },
+  },
 });

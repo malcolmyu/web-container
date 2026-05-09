@@ -15,10 +15,9 @@
   --text-primary: #cccccc;
   --text-secondary: #858585;
   --accent: #007acc;
-  --accent-hover: #1a8ad4;
 }
 
-html, body, #root {
+html, body, #app {
   height: 100%;
   overflow: hidden;
 }
@@ -34,7 +33,7 @@ body {
   height: 100%;
 }
 
-/* Sidebar */
+/* ── Sidebar ── */
 .sidebar {
   width: 240px;
   min-width: 240px;
@@ -70,6 +69,7 @@ body {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  user-select: none;
 }
 
 .tree-node:hover {
@@ -93,7 +93,7 @@ body {
   text-overflow: ellipsis;
 }
 
-/* Editor panel */
+/* ── Editor ── */
 .editor-panel {
   flex: 1;
   display: flex;
@@ -110,12 +110,32 @@ body {
   font-size: 14px;
 }
 
-/* Preview panel */
-.preview-panel {
+/* ── Right panel (preview + terminal) ── */
+.right-panel {
   flex: 1;
   border-left: 1px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+/* ── Preview ── */
+.preview-panel {
+  flex: 1;
   background: #fff;
   position: relative;
+  min-height: 0;
+}
+
+.preview-container {
+  height: 100%;
+  position: relative;
+}
+
+.preview-iframe {
+  width: 100%;
+  height: 100%;
+  border: none;
 }
 
 .preview-empty {
@@ -130,40 +150,39 @@ body {
   font-size: 14px;
 }
 
-.preview-container {
-  height: 100%;
-  position: relative;
-}
-
-.preview-loading {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--bg-primary);
-  z-index: 1;
-}
-
-.preview-iframe {
-  width: 100%;
-  height: 100%;
-  border: none;
-  transition: opacity 0.2s;
-}
-
-/* Loading */
-.loading-overlay {
-  height: 100%;
+/* ── Terminal overlay (install progress) ── */
+.terminal-overlay {
+  background: #0d1117;
+  border-top: 1px solid var(--border-color);
+  max-height: 200px;
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 16px;
-  color: var(--text-secondary);
-  font-size: 14px;
 }
 
+.terminal-header {
+  padding: 6px 12px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--border-color);
+  flex-shrink: 0;
+}
+
+.terminal-output {
+  flex: 1;
+  padding: 8px 12px;
+  font-family: 'JetBrains Mono', 'Fira Code', Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #c9d1d9;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+/* ── Loading ── */
 .loading-spinner {
   width: 32px;
   height: 32px;
