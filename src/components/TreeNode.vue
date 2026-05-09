@@ -2,7 +2,7 @@
 import { ref, computed } from 'vue'
 import {
   Folder, FolderOpen, File, FileCode, FileJson, FileText,
-  FileType, ChevronRight, Image, Globe, FileCog
+  FileType, ChevronRight, Image, Globe, FileCog, Trash2
 } from 'lucide-vue-next'
 
 export interface FileNode {
@@ -17,7 +17,7 @@ const props = defineProps<{
   depth: number
   currentFile: string | null
 }>()
-const emit = defineEmits<{ select: [path: string] }>()
+const emit = defineEmits<{ select: [path: string]; delete: [path: string] }>()
 
 const expanded = ref(true)
 
@@ -67,6 +67,9 @@ const leftPad = props.depth * 18 + 12
 
       <!-- Name -->
       <span class="file-name">{{ node.name }}</span>
+
+      <!-- Delete -->
+      <button class="delete-btn" title="Delete" @click.stop="emit('delete', node.path)"><Trash2 :size="13" /></button>
     </div>
 
     <template v-if="node.type === 'dir' && expanded && node.children">
@@ -76,7 +79,8 @@ const leftPad = props.depth * 18 + 12
         :node="child"
         :depth="depth + 1"
         :current-file="currentFile"
-        @select="(path) => emit('select', path)"
+        @select="(path: string) => emit('select', path)"
+        @delete="(path: string) => emit('delete', path)"
       />
     </template>
   </div>
@@ -157,5 +161,31 @@ const leftPad = props.depth * 18 + 12
 .file-name {
   overflow: hidden;
   text-overflow: ellipsis;
+  flex: 1;
+}
+
+/* Delete button */
+.delete-btn {
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.1s ease, color 0.1s ease, background 0.1s ease;
+  margin-left: auto;
+}
+.tree-row:hover .delete-btn {
+  opacity: 1;
+}
+.delete-btn:hover {
+  color: var(--red);
+  background: var(--bg-active);
 }
 </style>

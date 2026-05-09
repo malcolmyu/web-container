@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { Nodepod } from '@scelar/nodepod'
+import { Plus, FolderPlus } from 'lucide-vue-next'
 import type { NodepodProcess } from '@scelar/nodepod'
 import AnsiToHtml from 'ansi-to-html'
 import { VM_FILES } from './vm-template'
@@ -153,12 +154,19 @@ async function init() {
   }
 }
 
+// ── System dirs to skip in file tree ──
+const SKIP_DIRS = new Set([
+  'node_modules', 'home', 'tmp', 'proc', 'sys', 'dev',
+  'etc', 'var', 'usr', 'bin', 'lib', 'sbin', 'boot',
+  'opt', 'mnt', 'media', 'srv', 'run', 'root',
+])
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function buildTree(instance: any, dir = '/'): Promise<FileNode[]> {
   const entries = await instance.fs.readdir(dir)
   const result: FileNode[] = []
   for (const name of entries) {
-    if (name === 'node_modules') continue
+    if (SKIP_DIRS.has(name)) continue
     const fullPath = dir === '/' ? `/${name}` : `${dir}/${name}`
     try {
       const stat = await instance.fs.stat(fullPath)
@@ -175,6 +183,37 @@ async function handleSelectFile(path: string) { if (pod.value) await openFile(po
 async function handleFileChange(content: string) { if (pod.value && currentFile.value) { await pod.value.fs.writeFile(currentFile.value, content); fileContent.value = content; previewKey.value++ } }
 function toggleConsole() { consoleVisible.value = !consoleVisible.value }
 
+// ── File CRUD ──
+async function refreshTree() {
+  if (!pod.value) return
+  tree.value = await buildTree(pod.value)
+}
+async function handleNewFile() {
+  if (!pod.value) return
+  const name = window.prompt('File name:')
+  if (!name) return
+  await pod.value.fs.writeFile('/' + name, '')
+  await refreshTree()
+}
+async function handleNewFolder() {
+  if (!pod.value) return
+  const name = window.prompt('Folder name:')
+  if (!name) return
+  await pod.value.fs.mkdir('/' + name)
+  await refreshTree()
+}
+async function handleDeleteFile(path: string) {
+  if (!pod.value) return
+  if (!window.confirm(`Delete "${path}"?`)) return
+  try {
+    const stat = await pod.value.fs.stat(path)
+    if (stat.isDirectory) await pod.value.fs.rmdir(path, { recursive: true })
+    else await pod.value.fs.unlink(path)
+  } catch { return }
+  if (currentFile.value === path) { currentFile.value = null; fileContent.value = '' }
+  await refreshTree()
+}
+
 init()
 </script>
 
@@ -182,10 +221,14 @@ init()
   <div class="flex h-full" style="background:var(--bg-root);color:var(--text-primary)">
     <!-- ── Sidebar ── -->
     <div class="w-56 min-w-56 flex flex-col" style="background:var(--bg-surface);border-right:1px solid var(--border-subtle)">
-      <div class="flex items-center px-5 h-11 flex-shrink-0" style="border-bottom:1px solid var(--border-subtle)">
+      <div class="flex items-center justify-between px-5 h-11 flex-shrink-0" style="border-bottom:1px solid var(--border-subtle)">
         <span class="text-[11px] font-semibold tracking-widest select-none" style="color:var(--text-muted)">FILES</span>
+        <div class="flex items-center gap-0.5">
+          <button class="w-6 h-6 flex items-center justify-center rounded transition-colors" style="color:var(--text-muted)" title="New File" @click="handleNewFile" @mouseenter="(e: MouseEvent) => { (e.target as HTMLElement).style.color = 'var(--text-secondary)' }" @mouseleave="(e: MouseEvent) => { (e.target as HTMLElement).style.color = 'var(--text-muted)' }"><Plus :size="14" /></button>
+          <button class="w-6 h-6 flex items-center justify-center rounded transition-colors" style="color:var(--text-muted)" title="New Folder" @click="handleNewFolder" @mouseenter="(e: MouseEvent) => { (e.target as HTMLElement).style.color = 'var(--text-secondary)' }" @mouseleave="(e: MouseEvent) => { (e.target as HTMLElement).style.color = 'var(--text-muted)' }"><FolderPlus :size="14" /></button>
+        </div>
       </div>
-      <FileExplorer :tree="tree" :current-file="currentFile" @select="handleSelectFile" />
+      <FileExplorer :tree="tree" :current-file="currentFile" @select="handleSelectFile" @delete="handleDeleteFile" />
     </div>
 
     <!-- ── Editor ── -->

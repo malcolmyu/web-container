@@ -3,7 +3,7 @@ import TreeNode from './TreeNode.vue'
 import type { FileNode } from './TreeNode.vue'
 
 defineProps<{ tree: FileNode[]; currentFile: string | null }>()
-const emit = defineEmits<{ select: [path: string] }>()
+const emit = defineEmits<{ select: [path: string]; delete: [path: string] }>()
 </script>
 
 <template>
@@ -14,7 +14,8 @@ const emit = defineEmits<{ select: [path: string] }>()
       :node="node"
       :depth="0"
       :current-file="currentFile"
-      @select="(path) => emit('select', path)"
+      @select="(path: string) => emit('select', path)"
+      @delete="(path: string) => emit('delete', path)"
     />
   </div>
 </template>
