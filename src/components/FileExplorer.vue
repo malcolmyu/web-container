@@ -1,15 +1,13 @@
-<script setup>
+<script setup lang="ts">
 import TreeNode from './TreeNode.vue'
+import type { FileNode } from './TreeNode.vue'
 
-defineProps({
-  tree: Array,
-  currentFile: String,
-})
-const emit = defineEmits(['select'])
+defineProps<{ tree: FileNode[]; currentFile: string | null }>()
+const emit = defineEmits<{ select: [path: string] }>()
 </script>
 
 <template>
-  <div class="file-explorer">
+  <div class="h-full overflow-y-auto py-1.5">
     <TreeNode
       v-for="node in tree"
       :key="node.path"

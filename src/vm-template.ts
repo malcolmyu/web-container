@@ -2,7 +2,7 @@
 // After these files are written to the VFS, we run:
 //   1. npm install
 //   2. npx vite --host 0.0.0.0 --port 3000
-export const VM_FILES = {
+export const VM_FILES: Record<string, string> = {
   '/package.json': JSON.stringify({
     name: 'vue-playground',
     version: '1.0.0',

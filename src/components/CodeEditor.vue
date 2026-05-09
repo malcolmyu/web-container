@@ -1,4 +1,4 @@
-<script setup>
+<script setup lang="ts">
 import { ref, onMounted, onUnmounted, watch } from 'vue'
 import * as monaco from 'monaco-editor'
 
@@ -10,7 +10,7 @@ import htmlWorker from 'monaco-editor/esm/vs/language/html/html.worker?worker'
 import jsonWorker from 'monaco-editor/esm/vs/language/json/json.worker?worker'
 
 self.MonacoEnvironment = {
-  getWorker(_, label) {
+  getWorker(_: string, label: string) {
     if (label === 'json') return new jsonWorker()
     if (label === 'css' || label === 'scss' || label === 'less') return new cssWorker()
     if (label === 'html' || label === 'handlebars' || label === 'razor') return new htmlWorker()
@@ -19,18 +19,19 @@ self.MonacoEnvironment = {
   },
 }
 
-const props = defineProps({
-  path: String,
-  content: String,
-})
-const emit = defineEmits(['change'])
+const props = defineProps<{
+  path: string | null
+  content: string
+}>()
+const emit = defineEmits<{ change: [content: string] }>()
 
-const el = ref(null)
-let editor = null
-let subscription = null
+const el = ref<HTMLElement | null>(null)
+let editor: monaco.editor.IStandaloneCodeEditor | null = null
+let subscription: monaco.IDisposable | null = null
 let suppress = false
 
 onMounted(() => {
+  if (!el.value) return
   editor = monaco.editor.create(el.value, {
     value: props.content,
     language: languageFor(props.path),
@@ -45,7 +46,7 @@ onMounted(() => {
   })
   subscription = editor.onDidChangeModelContent(() => {
     if (suppress) return
-    emit('change', editor.getValue())
+    emit('change', editor!.getValue())
   })
 })
 
@@ -59,12 +60,13 @@ watch(() => props.content, (val) => {
   if (editor.getValue() === val) return
   suppress = true
   const model = editor.getModel()
+  if (!model) return
   model.setValue(val)
   monaco.editor.setModelLanguage(model, languageFor(props.path))
   suppress = false
 })
 
-function languageFor(path) {
+function languageFor(path: string | null): string {
   if (!path) return 'plaintext'
   if (path.endsWith('.vue')) return 'html'
   if (path.endsWith('.js') || path.endsWith('.jsx')) return 'javascript'

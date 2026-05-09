@@ -1,201 +1,202 @@
-<script setup>
+<script setup lang="ts">
 import { ref, computed } from 'vue'
 import { Nodepod } from '@scelar/nodepod'
-import { VM_FILES } from './vm-template.js'
+import type { NodepodProcess } from '@scelar/nodepod'
+import AnsiToHtml from 'ansi-to-html'
+import { VM_FILES } from './vm-template'
 import FileExplorer from './components/FileExplorer.vue'
 import CodeEditor from './components/CodeEditor.vue'
 import Preview from './components/Preview.vue'
+import type { FileNode } from './components/TreeNode.vue'
+
+// ── Output cleanup: normalize line endings, strip bare CR ──
+function cleanOutput(text: string): string {
+  return text.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
+}
+
+// ── ANSI converter ──
+const ansi = new AnsiToHtml({
+  fg: '#e8e4e1', bg: '#0d0b0c', newline: true,
+  colors: {
+    0: '#1a1718', 1: '#d9706a', 2: '#7ab87e', 3: '#d9a85c',
+    4: '#7a9ec7', 5: '#b89ac7', 6: '#06b6d4', 7: '#e8e4e1',
+    8: '#6b6460', 9: '#f0908c', 10: '#8cc890', 11: '#e5c07b',
+    12: '#8db2d8', 13: '#c9aed8', 14: '#22d3ee', 15: '#fafafa',
+  },
+})
 
 // ── State ──
-const pod = ref(null)
-const tree = ref([])
-const currentFile = ref(null)
+const pod = ref<Nodepod | null>(null)
+const tree = ref<FileNode[]>([])
+const currentFile = ref<string | null>(null)
 const fileContent = ref('')
-const phase = ref('booting')         // booting | installing | starting | ready | error
+const phase = ref<string>('booting')
 const statusMessage = ref('')
-const serverUrl = ref(null)
+const serverUrl = ref<string | null>(null)
 const installOutput = ref('')
+const consoleVisible = ref(true)
+const previewKey = ref(0)
+const consoleHeight = ref(220)
+const isResizing = ref(false)
+const rightPanelRef = ref<HTMLElement | null>(null)
 
-// ── Derived ──
-const isHtmlFile = (path) => path?.endsWith('.html') || path?.endsWith('.htm')
+const coloredOutput = computed(() => ansi.toHtml(cleanOutput(installOutput.value)))
 const showTerminal = computed(() =>
-  ['installing', 'starting'].includes(phase.value)
+  consoleVisible.value && ['installing', 'starting', 'ready'].includes(phase.value)
 )
+
+// ── Console resize (rAF-throttled for smooth drag) ──
+let resizeRaf: number | null = null
+let pendingClientY = 0
+function startResize(e: MouseEvent) {
+  isResizing.value = true
+  pendingClientY = e.clientY
+  document.addEventListener('mousemove', onResize, { passive: true })
+  document.addEventListener('mouseup', stopResize)
+  document.body.style.cursor = 'row-resize'
+  document.body.style.userSelect = 'none'
+  e.preventDefault()
+}
+function onResize(e: MouseEvent) {
+  pendingClientY = e.clientY
+  if (!resizeRaf) {
+    resizeRaf = requestAnimationFrame(() => {
+      resizeRaf = null
+      if (!rightPanelRef.value) return
+      const rect = rightPanelRef.value.getBoundingClientRect()
+      consoleHeight.value = Math.max(80, Math.min(rect.height * 0.7, rect.bottom - pendingClientY))
+    })
+  }
+}
+function stopResize() {
+  isResizing.value = false
+  if (resizeRaf) { cancelAnimationFrame(resizeRaf); resizeRaf = null }
+  document.removeEventListener('mousemove', onResize)
+  document.removeEventListener('mouseup', stopResize)
+  document.body.style.cursor = ''
+  document.body.style.userSelect = ''
+}
 
 // ── Bootstrap ──
 async function init() {
   try {
-    // 1. Boot Nodepod
     phase.value = 'booting'
-    statusMessage.value = 'Booting NodePod runtime...'
-
+    statusMessage.value = 'Booting runtime...'
     const instance = await Nodepod.boot({
-      files: VM_FILES,
-      watermark: false,
-      onServerReady: (port, url) => {
-        serverUrl.value = url
-        phase.value = 'ready'
+      files: VM_FILES, watermark: false,
+      onServerReady: (port: number, url: string) => {
+        serverUrl.value = url; phase.value = 'ready'
         statusMessage.value = `Dev server running on port ${port}`
       },
     })
     pod.value = instance
-
-    // 2. Build file tree
     const fileTree = await buildTree(instance)
     tree.value = fileTree
 
-    // 3. Run npm install
     phase.value = 'installing'
     statusMessage.value = 'Installing dependencies...'
-
     const installProc = await instance.spawn('npm', ['install'])
-    installProc.on('output', (chunk) => {
-      installOutput.value += chunk
-    })
-    installProc.on('error', (chunk) => {
-      installOutput.value += chunk
-    })
-    const installResult = await installProc.completion
-    if (installResult.exitCode !== 0) {
-      throw new Error(`npm install failed (exit ${installResult.exitCode})`)
-    }
+    installProc.on('output', (c: string) => { installOutput.value += c })
+    installProc.on('error', (c: string) => { installOutput.value += c })
+    if ((await installProc.completion).exitCode !== 0) throw new Error('npm install failed')
 
-    // 4. Rebuild tree (node_modules may be populated)
     const updatedTree = await buildTree(instance)
     tree.value = updatedTree
 
-    // 5. Start Vite dev server
     phase.value = 'starting'
-    statusMessage.value = 'Starting Vite dev server...'
-
-    // Fire-and-forget: onServerReady will set phase to 'ready'.
-    // If the server doesn't come up within 30s, show an error.
+    statusMessage.value = 'Starting dev server...'
     const serverTimeout = setTimeout(() => {
-      if (phase.value === 'starting') {
-        phase.value = 'error'
-        statusMessage.value = 'Dev server timed out after 30s'
-      }
+      if (phase.value === 'starting') { phase.value = 'error'; statusMessage.value = 'Dev server timed out' }
     }, 30000)
-
     const viteProc = await instance.spawn('npx', ['vite', '--host', '0.0.0.0', '--port', '3000'])
-    viteProc.on('error', (chunk) => {
-      installOutput.value += chunk
-    })
-    viteProc.completion.then((r) => {
+    viteProc.on('output', (c: string) => { installOutput.value += c })
+    viteProc.on('error', (c: string) => { installOutput.value += c })
+    viteProc.completion.then(r => {
       clearTimeout(serverTimeout)
-      if (phase.value === 'starting' && r.exitCode !== 0) {
-        phase.value = 'error'
-        statusMessage.value = `Vite exited with code ${r.exitCode}`
-      }
+      if (phase.value === 'starting' && r.exitCode !== 0) { phase.value = 'error'; statusMessage.value = `Vite exited with code ${r.exitCode}` }
     })
 
-    // 6. Open first file
-    const findFirstFile = (nodes) => {
-      for (const node of nodes) {
-        if (node.type === 'file') return node
-        if (node.children) {
-          const found = findFirstFile(node.children)
-          if (found) return found
-        }
-      }
+    const findFirstFile = (nodes: FileNode[]): FileNode | null => {
+      for (const n of nodes) { if (n.type === 'file') return n; if (n.children) { const f = findFirstFile(n.children); if (f) return f } }
       return null
     }
     const firstFile = findFirstFile(updatedTree)
-    if (firstFile) {
-      await openFile(instance, firstFile.path)
-    }
-  } catch (err) {
-    phase.value = 'error'
-    statusMessage.value = err.message || 'Unknown error'
+    if (firstFile) await openFile(instance, firstFile.path)
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : 'Unknown error'
+    phase.value = 'error'; statusMessage.value = msg
     console.error('Boot failed:', err)
   }
 }
 
-// ── File tree ──
-async function buildTree(instance, dir = '/') {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function buildTree(instance: any, dir = '/'): Promise<FileNode[]> {
   const entries = await instance.fs.readdir(dir)
-  const result = []
+  const result: FileNode[] = []
   for (const name of entries) {
-    // skip node_modules — too many entries, hurts perf
     if (name === 'node_modules') continue
     const fullPath = dir === '/' ? `/${name}` : `${dir}/${name}`
     try {
       const stat = await instance.fs.stat(fullPath)
-      if (stat.isDirectory) {
-        const children = await buildTree(instance, fullPath)
-        result.push({ name, path: fullPath, type: 'dir', children })
-      } else {
-        result.push({ name, path: fullPath, type: 'file' })
-      }
-    } catch {
-      result.push({ name, path: fullPath, type: 'file' })
-    }
+      if (stat.isDirectory) result.push({ name, path: fullPath, type: 'dir', children: await buildTree(instance, fullPath) })
+      else result.push({ name, path: fullPath, type: 'file' })
+    } catch { result.push({ name, path: fullPath, type: 'file' }) }
   }
-  result.sort((a, b) => {
-    if (a.type !== b.type) return a.type === 'dir' ? -1 : 1
-    return a.name.localeCompare(b.name)
-  })
+  result.sort((a, b) => a.type !== b.type ? (a.type === 'dir' ? -1 : 1) : a.name.localeCompare(b.name))
   return result
 }
 
-// ── File operations ──
-async function openFile(instance, path) {
-  const content = await instance.fs.readFile(path, 'utf8')
-  currentFile.value = path
-  fileContent.value = content
-}
+async function openFile(instance: any, path: string) { currentFile.value = path; fileContent.value = await instance.fs.readFile(path, 'utf8') }
+async function handleSelectFile(path: string) { if (pod.value) await openFile(pod.value, path) }
+async function handleFileChange(content: string) { if (pod.value && currentFile.value) { await pod.value.fs.writeFile(currentFile.value, content); fileContent.value = content; previewKey.value++ } }
+function toggleConsole() { consoleVisible.value = !consoleVisible.value }
 
-async function handleSelectFile(path) {
-  if (!pod.value) return
-  await openFile(pod.value, path)
-}
-
-async function handleFileChange(content) {
-  if (!pod.value || !currentFile.value) return
-  await pod.value.fs.writeFile(currentFile.value, content)
-  fileContent.value = content
-  // Vite HMR handles the preview refresh automatically — no manual update needed
-}
-
-// ── Start ──
 init()
 </script>
 
 <template>
-  <div class="app">
-    <!-- Sidebar -->
-    <div class="sidebar">
-      <div class="sidebar-header">Files</div>
-      <FileExplorer
-        :tree="tree"
-        :current-file="currentFile"
-        @select="handleSelectFile"
-      />
+  <div class="flex h-full" style="background:var(--bg-root);color:var(--text-primary)">
+    <!-- ── Sidebar ── -->
+    <div class="w-56 min-w-56 flex flex-col" style="background:var(--bg-surface);border-right:1px solid var(--border-subtle)">
+      <div class="flex items-center px-5 h-11 flex-shrink-0" style="border-bottom:1px solid var(--border-subtle)">
+        <span class="text-[11px] font-semibold tracking-widest select-none" style="color:var(--text-muted)">FILES</span>
+      </div>
+      <FileExplorer :tree="tree" :current-file="currentFile" @select="handleSelectFile" />
     </div>
 
-    <!-- Editor -->
-    <div class="editor-panel">
-      <CodeEditor
-        v-if="currentFile"
-        :path="currentFile"
-        :content="fileContent"
-        @change="handleFileChange"
-      />
-      <div v-else class="editor-empty">Select a file to edit</div>
+    <!-- ── Editor ── -->
+    <div class="flex-1 flex flex-col min-w-0" style="background:var(--bg-root)">
+      <div v-if="currentFile" class="flex items-center h-11 px-5 flex-shrink-0 gap-2.5" style="background:var(--bg-surface);border-bottom:1px solid var(--border-subtle)">
+        <span class="w-1.5 h-1.5 rounded-full flex-shrink-0" style="background:var(--accent)" />
+        <span class="text-[13px] truncate" style="color:var(--text-secondary)">{{ currentFile }}</span>
+      </div>
+      <CodeEditor v-if="currentFile" :path="currentFile" :content="fileContent" @change="handleFileChange" />
+      <div v-else class="flex-1 flex items-center justify-center">
+        <div class="text-center space-y-3 animate-fade-in">
+          <svg class="w-12 h-12 mx-auto opacity-20" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1"><path stroke-linecap="round" stroke-linejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z"/></svg>
+          <p style="color:var(--text-muted);font-size:13px">Select a file to edit</p>
+        </div>
+      </div>
     </div>
 
-    <!-- Preview / Terminal -->
-    <div class="right-panel">
-      <Preview
-        :server-url="serverUrl"
-        :status="phase"
-        :status-message="statusMessage"
-      />
+    <!-- ── Right panel ── -->
+    <div ref="rightPanelRef" class="flex-1 flex flex-col min-w-0 relative" style="border-left:1px solid var(--border-subtle)">
+      <Preview :server-url="serverUrl" :status="phase" :status-message="statusMessage" :console-visible="consoleVisible" :preview-key="previewKey" @toggle-console="toggleConsole" />
 
-      <!-- Install progress overlay -->
-      <div v-if="showTerminal" class="terminal-overlay">
-        <div class="terminal-header">Console</div>
-        <pre class="terminal-output">{{ installOutput }}</pre>
+      <!-- iframe event shield — prevents iframe from stealing mousemove during console resize -->
+      <div v-if="isResizing" class="absolute inset-0 z-20" style="cursor:row-resize" />
+
+      <div v-if="showTerminal" class="resize-handle" :class="{active:isResizing}" @mousedown="startResize" />
+
+      <div v-if="showTerminal" class="flex flex-col flex-shrink-0 overflow-hidden" :style="{height:consoleHeight+'px',background:'var(--bg-root)',borderTop:'1px solid var(--border-subtle)'}">
+        <div class="flex items-center justify-between px-4 h-9 flex-shrink-0" style="background:var(--bg-surface);border-bottom:1px solid var(--border-subtle)">
+          <div class="flex items-center gap-2">
+            <span class="w-1.5 h-1.5 rounded-full" style="background:var(--accent)" />
+            <span class="text-[11px] font-semibold tracking-widest select-none" style="color:var(--text-muted)">CONSOLE</span>
+          </div>
+          <button class="w-6 h-6 flex items-center justify-center rounded text-sm leading-none transition-colors" style="color:var(--text-muted)" @click="toggleConsole" @mouseenter="(e: MouseEvent) => { (e.target as HTMLElement).style.color = 'var(--text-secondary)'; (e.target as HTMLElement).style.background = 'var(--bg-hover)' }" @mouseleave="(e: MouseEvent) => { (e.target as HTMLElement).style.color = 'var(--text-muted)'; (e.target as HTMLElement).style.background = 'transparent' }">×</button>
+        </div>
+        <div class="flex-1 overflow-y-auto p-4 whitespace-pre-wrap" style="font-size:12px;line-height:1.6;font-family:'JetBrains Mono','Fira Code',Consolas,monospace" v-html="coloredOutput" />
       </div>
     </div>
   </div>
