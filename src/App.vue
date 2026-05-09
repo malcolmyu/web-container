@@ -29,7 +29,13 @@ function cleanOutput(text: string): string {
     }
     result.push(line)
   }
-  return result.join('\n')
+  // 4. Collapse consecutive blank lines (Vite startup uses ANSI cursor-up that leaves gaps)
+  const final: string[] = []
+  for (const line of result) {
+    if (line.length === 0 && final.length > 0 && final[final.length - 1].length === 0) continue
+    final.push(line)
+  }
+  return final.join('\n')
 }
 
 // ── ANSI converter ──
