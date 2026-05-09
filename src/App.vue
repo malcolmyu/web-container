@@ -9,9 +9,27 @@ import CodeEditor from './components/CodeEditor.vue'
 import Preview from './components/Preview.vue'
 import type { FileNode } from './components/TreeNode.vue'
 
-// ── Output cleanup: normalize line endings, strip bare CR ──
+// ── Output cleanup: handle \r overwrite semantics, collapse spinner dupes ──
+const spinnerRe = /^[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏✔✖⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏ ]/
 function cleanOutput(text: string): string {
-  return text.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
+  let out = text.replace(/\r\n/g, '\n')
+  const lines = out.split('\n').map(line => {
+    const lastCR = line.lastIndexOf('\r')
+    return lastCR >= 0 ? line.substring(lastCR + 1) : line
+  })
+  const result: string[] = []
+  for (const line of lines) {
+    if (result.length > 0) {
+      const prevBase = result[result.length - 1].replace(spinnerRe, '')
+      const currBase = line.replace(spinnerRe, '')
+      if (prevBase === currBase && currBase.length > 0) {
+        result[result.length - 1] = line
+        continue
+      }
+    }
+    result.push(line)
+  }
+  return result.join('\n')
 }
 
 // ── ANSI converter ──
